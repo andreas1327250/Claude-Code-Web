@@ -10,6 +10,54 @@ A simple web application that shows train seat availability between Linz and Vie
 - 📊 Train details including duration, platform, and pricing
 - 🎨 Modern, responsive UI
 
+## 🚀 Live Demo
+
+This app is automatically deployed to GitHub Pages:
+
+**🔗 [View Live App](https://andreas1327250.github.io/Claude-Code-Web/)**
+
+The deployment happens automatically via GitHub Actions whenever changes are pushed to the repository.
+
+## 📦 Deployment
+
+### GitHub Pages (Automatic)
+
+This repository is configured for automatic deployment to GitHub Pages:
+
+1. **Automatic deployment** via GitHub Actions on every push
+2. **Live URL**: `https://andreas1327250.github.io/Claude-Code-Web/`
+3. **Workflow file**: `.github/workflows/deploy.yml`
+
+### Local Testing
+
+Run the app locally with Python's built-in server:
+
+```bash
+# Start local server
+python3 server.py
+# or
+npm run serve
+
+# Open http://localhost:8000 in your browser
+```
+
+### Manual Deployment to Other Platforms
+
+**Vercel:**
+```bash
+npm i -g vercel
+vercel
+```
+
+**Netlify:**
+```bash
+npm i -g netlify-cli
+netlify deploy
+```
+
+**Cloudflare Pages, Firebase, or AWS S3:**
+Simply upload the HTML, CSS, and JS files to your hosting platform.
+
 ## Reverse-Engineered ÖBB Endpoints
 
 This app uses the public HAFAS (HaCon Fahrplan-Auskunfts-System) endpoints provided by ÖBB:
