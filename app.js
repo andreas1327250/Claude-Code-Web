@@ -221,6 +221,58 @@ async function searchTrains() {
     }
 }
 
+// Calculate realistic train capacity based on type
+function getTrainCapacity(category) {
+    const capacities = {
+        'RailJet': { total: 408, firstClass: 66, secondClass: 342 }, // ÖBB RailJet typical capacity
+        'IC': { total: 320, firstClass: 48, secondClass: 272 },
+        'REX': { total: 280, firstClass: 40, secondClass: 240 },
+        'S-Bahn': { total: 350, firstClass: 0, secondClass: 350 },
+        'Train': { total: 300, firstClass: 45, secondClass: 255 }
+    };
+    return capacities[category] || capacities['Train'];
+}
+
+// Calculate realistic seat availability
+function calculateSeatAvailability(category, timeOfDay, index) {
+    const capacity = getTrainCapacity(category);
+    const totalSeats = capacity.secondClass; // Focusing on 2nd class
+
+    // Factor in time of day (rush hours = more crowded)
+    const hour = parseInt(timeOfDay.split(':')[0]);
+    let occupancyBase = 0.5; // 50% base occupancy
+
+    // Rush hours (6-9am, 4-7pm)
+    if ((hour >= 6 && hour <= 9) || (hour >= 16 && hour <= 19)) {
+        occupancyBase = 0.75; // 75% occupancy during rush
+    } else if (hour >= 10 && hour <= 15) {
+        occupancyBase = 0.4; // 40% off-peak
+    } else {
+        occupancyBase = 0.3; // 30% late/early
+    }
+
+    // Add some randomness
+    const randomFactor = (Math.random() * 0.3) - 0.15; // ±15%
+    let occupancy = Math.max(0.1, Math.min(0.95, occupancyBase + randomFactor));
+
+    // Popular trains fill up more
+    if (index === 0 || index === 2) {
+        occupancy = Math.min(0.9, occupancy + 0.15);
+    }
+
+    const occupiedSeats = Math.floor(totalSeats * occupancy);
+    const availableSeats = totalSeats - occupiedSeats;
+
+    return {
+        total: totalSeats,
+        available: availableSeats,
+        occupied: occupiedSeats,
+        percentage: Math.round((availableSeats / totalSeats) * 100),
+        status: availableSeats > totalSeats * 0.3 ? 'available' :
+                availableSeats > totalSeats * 0.1 ? 'limited' : 'unavailable'
+    };
+}
+
 // Generate realistic mock data
 function generateEnhancedMockData(baseTime, from, to) {
     const connections = [];
@@ -238,9 +290,13 @@ function generateEnhancedMockData(baseTime, from, to) {
 
         const hours = Math.floor(cat.duration / 60);
         const mins = cat.duration % 60;
+        const timeStr = depTime.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' });
+
+        // Calculate realistic seat availability
+        const seatInfo = calculateSeatAvailability(cat.name, timeStr, index);
 
         connections.push({
-            departure: depTime.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' }),
+            departure: timeStr,
             arrival: arrTime.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' }),
             duration: `${hours}:${String(mins).padStart(2, '0')}`,
             category: cat.name,
@@ -248,7 +304,8 @@ function generateEnhancedMockData(baseTime, from, to) {
             platform: String(Math.floor(Math.random() * 8) + 1),
             changes: cat.changes,
             price: cat.price,
-            delay: Math.random() > 0.85 ? Math.floor(Math.random() * 12) + 3 : 0
+            delay: Math.random() > 0.85 ? Math.floor(Math.random() * 12) + 3 : 0,
+            seats: seatInfo
         });
     });
 
@@ -266,12 +323,17 @@ function displayResults(connections, fromStation, toStation) {
     }
 
     connections.forEach((conn, index) => {
-        const availabilityTypes = ['available', 'limited', 'available', 'available'];
-        const availability = availabilityTypes[index % availabilityTypes.length];
+        // Use seat info if available, otherwise calculate it
+        let seatInfo = conn.seats;
+        if (!seatInfo) {
+            seatInfo = calculateSeatAvailability(conn.category, conn.departure, index);
+        }
+
+        const availability = seatInfo.status;
         const availabilityText = {
-            'available': 'Seats Available',
-            'limited': 'Limited Availability',
-            'unavailable': 'Fully Booked'
+            'available': 'Good Availability',
+            'limited': 'Limited Seats',
+            'unavailable': 'Almost Full'
         }[availability] || 'Unknown';
 
         const delayHTML = conn.delay && conn.delay > 0
@@ -318,9 +380,22 @@ function displayResults(connections, fromStation, toStation) {
                     <div class="detail-value">€ ${price.toFixed(2)}</div>
                 </div>
                 <div class="detail-item">
-                    <div class="detail-label">Seat Availability</div>
+                    <div class="detail-label">Seat Availability (2nd Class)</div>
                     <div class="detail-value">
-                        <span class="availability ${availability}">${availabilityText}</span>
+                        <div style="margin-bottom: 5px;">
+                            <strong style="font-size: 1.3rem; color: ${seatInfo.status === 'available' ? '#28a745' : seatInfo.status === 'limited' ? '#ffc107' : '#dc3545'}">
+                                ${seatInfo.available} / ${seatInfo.total}
+                            </strong>
+                            <span style="color: #888; font-size: 0.9rem;"> seats available</span>
+                        </div>
+                        <div class="occupancy-bar">
+                            <div class="occupancy-fill ${seatInfo.percentage > 30 ? 'occupancy-low' : seatInfo.percentage > 10 ? 'occupancy-medium' : 'occupancy-high'}"
+                                 style="width: ${seatInfo.percentage}%"></div>
+                        </div>
+                        <div style="margin-top: 8px;">
+                            <span class="availability ${availability}">${availabilityText}</span>
+                            <span style="color: #666; font-size: 0.85rem; margin-left: 8px;">${seatInfo.percentage}% free</span>
+                        </div>
                     </div>
                 </div>
             </div>
