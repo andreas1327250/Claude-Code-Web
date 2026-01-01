@@ -1,0 +1,19 @@
+{
+  "name": "oebb-train-availability",
+  "version": "1.0.0",
+  "description": "ÖBB Train Seat Availability App - Linz to Vienna",
+  "main": "app.js",
+  "scripts": {
+    "start": "python3 server.py",
+    "serve": "python3 -m http.server 8000"
+  },
+  "keywords": [
+    "oebb",
+    "train",
+    "austria",
+    "hafas",
+    "railway"
+  ],
+  "author": "",
+  "license": "MIT"
+}
