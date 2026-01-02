@@ -1,7 +1,7 @@
-// ÖBB Train Availability App - Official mgate.exe API
-// Using https://fahrplan.oebb.at/bin/mgate.exe
+// ÖBB Train Availability App - Official gate API
+// Using https://fahrplan.oebb.at/gate
 
-const API_ENDPOINT = 'https://fahrplan.oebb.at/bin/mgate.exe';
+const API_ENDPOINT = 'https://fahrplan.oebb.at/gate';
 const CORS_PROXY = 'https://corsproxy.io/?';
 
 function getProxiedURL(url) {
@@ -17,28 +17,33 @@ window.addEventListener('DOMContentLoaded', () => {
 // Make HAFAS mgate request
 async function makeHAFASRequest(method, params) {
     const body = {
+        id: Math.random().toString(36).substring(2, 15),
+        ver: "1.88",
+        lang: "deu",
         auth: {
             type: "AID",
-            aid: "OWDL4fE4ixNiPBBm"  // ÖBB mobile app token
+            aid: "5vHavmuWPWIfetEe"  // ÖBB webapp token
         },
         client: {
             id: "OEBB",
-            type: "AND",
-            name: "oebbANDROID",
-            v: "6080600"
+            type: "WEB",
+            name: "webapp",
+            l: "vs_webapp",
+            v: 21804
         },
-        ver: "1.65",
-        ext: "OEBB.17",
-        lang: "deu",
+        formatted: false,
+        ext: "OEBB.14",
         svcReqL: [{
+            req: params,
             meth: method,
-            req: params
+            id: "1|"
         }]
     };
 
     console.log('🚀 HAFAS Request:', method, params);
 
-    const proxiedURL = getProxiedURL(API_ENDPOINT);
+    const url = `${API_ENDPOINT}?rnd=${Date.now()}`;
+    const proxiedURL = getProxiedURL(url);
     console.log('🌐 Calling via proxy:', proxiedURL);
 
     const response = await fetch(proxiedURL, {
@@ -79,11 +84,13 @@ async function searchStation(query) {
 
         const result = await makeHAFASRequest('LocMatch', {
             input: {
+                field: "S",
                 loc: {
-                    name: query,
-                    type: "S"  // S = Station
+                    type: "ALL",
+                    dist: 1000,
+                    name: query
                 },
-                maxLoc: 5
+                maxLoc: 7
             }
         });
 
