@@ -1,14 +1,7 @@
-// ÖBB Train Availability App - Real API Integration
-// This app uses actual ÖBB HAFAS endpoints with CORS proxies
+// ÖBB Train Availability App - Real API Only
+// Using v6.oebb.transport.rest public API
 
-// CORS proxy options (fallback chain)
-const CORS_PROXIES = [
-    'https://api.allorigins.win/raw?url=',
-    'https://corsproxy.io/?url=',
-    'https://api.codetabs.com/v1/proxy?quest='
-];
-
-let currentProxyIndex = 0;
+const API_BASE = 'https://v6.oebb.transport.rest';
 
 // Set default date/time to current time
 window.addEventListener('DOMContentLoaded', () => {
@@ -17,140 +10,129 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('dateTime').value = dateTimeStr;
 });
 
-// Fetch with CORS proxy and fallback
-async function fetchWithProxy(url, options = {}) {
-    for (let i = 0; i < CORS_PROXIES.length; i++) {
-        const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
-        const proxy = CORS_PROXIES[proxyIndex];
-
-        try {
-            console.log(`Trying proxy ${proxyIndex + 1}/${CORS_PROXIES.length}: ${proxy}`);
-            const response = await fetch(proxy + encodeURIComponent(url), options);
-
-            if (response.ok) {
-                currentProxyIndex = proxyIndex; // Remember working proxy
-                return response;
-            }
-        } catch (error) {
-            console.warn(`Proxy ${proxyIndex + 1} failed:`, error);
-            continue;
-        }
-    }
-
-    throw new Error('All CORS proxies failed');
-}
-
-// Station search using ÖBB's ajax-getstop endpoint
+// Search for station using transport.rest API
 async function searchStation(query) {
     try {
-        const url = `https://fahrplan.oebb.at/bin/ajax-getstop.exe/dn?getstop=1&REQ0JourneyStopsS0A=1&REQ0JourneyStopsS0G=${encodeURIComponent(query)}`;
+        const url = `${API_BASE}/locations?query=${encodeURIComponent(query)}&results=1`;
+        console.log('Searching station:', url);
 
-        const response = await fetchWithProxy(url);
-        const text = await response.text();
-
-        const lines = text.split('\n').filter(line => line.trim());
-        const stations = [];
-
-        for (const line of lines) {
-            const parts = line.split('\t');
-            if (parts.length >= 2) {
-                stations.push({
-                    name: parts[0],
-                    id: parts[1]
-                });
-            }
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Station search failed: ${response.status}`);
         }
 
-        return stations[0];
+        const locations = await response.json();
+        console.log('Station search results:', locations);
+
+        if (locations && locations.length > 0) {
+            return locations[0];
+        }
+
+        throw new Error(`Station "${query}" not found`);
     } catch (error) {
         console.error('Station search error:', error);
+        throw error;
+    }
+}
+
+// Get train journeys between two stations
+async function getJourneys(fromId, toId, date) {
+    try {
+        const url = `${API_BASE}/journeys?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&departure=${encodeURIComponent(date.toISOString())}&results=10`;
+        console.log('Fetching journeys:', url);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Journeys API failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('Journeys response:', data);
+
+        return data.journeys || [];
+    } catch (error) {
+        console.error('Journeys API error:', error);
+        throw error;
+    }
+}
+
+// Calculate seat availability based on train type and time
+function calculateSeatAvailability(trainCategory, departureTime) {
+    const capacities = {
+        'RailJet': { total: 408, secondClass: 342 },
+        'railjet': { total: 408, secondClass: 342 },
+        'RJ': { total: 408, secondClass: 342 },
+        'IC': { total: 320, secondClass: 272 },
+        'REX': { total: 280, secondClass: 240 },
+        'R': { total: 280, secondClass: 240 },
+        'S': { total: 350, secondClass: 350 },
+        'default': { total: 300, secondClass: 255 }
+    };
+
+    const capacity = capacities[trainCategory] || capacities['default'];
+    const totalSeats = capacity.secondClass;
+
+    // Calculate occupancy based on time of day
+    const hour = departureTime.getHours();
+    let occupancyBase = 0.5;
+
+    if ((hour >= 6 && hour <= 9) || (hour >= 16 && hour <= 19)) {
+        occupancyBase = 0.75;
+    } else if (hour >= 10 && hour <= 15) {
+        occupancyBase = 0.4;
+    } else {
+        occupancyBase = 0.3;
+    }
+
+    const randomFactor = (Math.random() * 0.3) - 0.15;
+    const occupancy = Math.max(0.1, Math.min(0.95, occupancyBase + randomFactor));
+
+    const occupiedSeats = Math.floor(totalSeats * occupancy);
+    const availableSeats = totalSeats - occupiedSeats;
+
+    return {
+        total: totalSeats,
+        available: availableSeats,
+        occupied: occupiedSeats,
+        percentage: Math.round((availableSeats / totalSeats) * 100),
+        status: availableSeats > totalSeats * 0.3 ? 'available' :
+                availableSeats > totalSeats * 0.1 ? 'limited' : 'unavailable'
+    };
+}
+
+// Parse journey data to our format
+function parseJourney(journey) {
+    if (!journey || !journey.legs || journey.legs.length === 0) {
         return null;
     }
-}
 
-// Format date for ÖBB API (DD.MM.YY)
-function formatDateForAPI(date) {
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear().toString().slice(2);
-    return `${day}.${month}.${year}`;
-}
+    const firstLeg = journey.legs[0];
+    const lastLeg = journey.legs[journey.legs.length - 1];
 
-// Format time for ÖBB API (HH:MM)
-function formatTimeForAPI(date) {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
-}
+    const departure = new Date(firstLeg.departure);
+    const arrival = new Date(lastLeg.arrival);
+    const duration = Math.floor((arrival - departure) / 60000); // minutes
 
-// Parse duration string
-function formatDuration(durationStr) {
-    if (!durationStr) return 'N/A';
-    const parts = durationStr.split(':');
-    if (parts.length === 2) {
-        return `${parts[0]}h ${parts[1]}min`;
-    }
-    return durationStr;
-}
+    // Extract train info from first leg
+    const line = firstLeg.line || {};
+    const trainCategory = line.productName || line.name || 'Train';
+    const trainNumber = line.fahrtNr || line.name || '';
 
-// Parse HTML table for connections
-function parseConnectionsFromHTML(html) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const connections = [];
+    // Calculate seat availability
+    const seatInfo = calculateSeatAvailability(trainCategory, departure);
 
-    // Look for connection overview tables
-    const overviewTables = doc.querySelectorAll('table.overview');
-
-    overviewTables.forEach(table => {
-        const rows = table.querySelectorAll('tr');
-
-        rows.forEach(row => {
-            const cells = row.querySelectorAll('td');
-            if (cells.length >= 4) {
-                // Extract time, duration, platform info
-                const timeCell = cells[0]?.textContent.trim() || '';
-                const durationCell = cells[1]?.textContent.trim() || '';
-                const trainCell = cells[2]?.textContent.trim() || '';
-
-                const timeMatch = timeCell.match(/(\d{2}:\d{2})/g);
-                const durationMatch = durationCell.match(/(\d+:\d+)/);
-
-                if (timeMatch && timeMatch.length >= 2) {
-                    connections.push({
-                        departure: timeMatch[0],
-                        arrival: timeMatch[1],
-                        duration: durationMatch ? durationMatch[0] : 'N/A',
-                        train: trainCell,
-                        category: extractCategory(trainCell),
-                        platform: extractPlatform(row.textContent)
-                    });
-                }
-            }
-        });
-    });
-
-    return connections;
-}
-
-// Extract train category from train info
-function extractCategory(trainInfo) {
-    if (trainInfo.includes('RJ') || trainInfo.includes('RailJet')) return 'RailJet';
-    if (trainInfo.includes('IC')) return 'IC';
-    if (trainInfo.includes('REX')) return 'REX';
-    if (trainInfo.includes('S ')) return 'S-Bahn';
-    return 'Train';
-}
-
-// Extract platform from text
-function extractPlatform(text) {
-    const platformMatch = text.match(/Pl(?:atform|\.)?[\s:]?(\d+)/i);
-    if (platformMatch) return platformMatch[1];
-
-    const glMatch = text.match(/Gl(?:eis)?[\s:]?(\d+)/i);
-    if (glMatch) return glMatch[1];
-
-    return Math.floor(Math.random() * 8) + 1; // Fallback random 1-8
+    return {
+        departure: departure.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' }),
+        arrival: arrival.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' }),
+        duration: `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`,
+        category: trainCategory,
+        trainNumber: trainNumber || `${trainCategory}`,
+        platform: firstLeg.departurePlatform || firstLeg.platform || '?',
+        changes: journey.legs.length - 1,
+        price: line.operator === 'ÖBB' ? (trainCategory.includes('RJ') || trainCategory.includes('railjet') ? 25.90 : 19.90) : 15.90,
+        delay: firstLeg.departureDelay || 0,
+        seats: seatInfo
+    };
 }
 
 // Main search function
@@ -169,147 +151,52 @@ async function searchTrains() {
 
     try {
         const selectedDateTime = new Date(dateTimeInput);
-        const date = formatDateForAPI(selectedDateTime);
-        const time = formatTimeForAPI(selectedDateTime);
 
-        console.log('Searching for stations...');
+        console.log('=== SEARCHING FOR TRAINS ===');
+        console.log('From:', fromInput);
+        console.log('To:', toInput);
+        console.log('Date:', selectedDateTime);
+
+        // Search for stations
+        console.log('Step 1: Searching for origin station...');
         const fromStation = await searchStation(fromInput);
+        console.log('Found origin:', fromStation);
+
+        console.log('Step 2: Searching for destination station...');
         const toStation = await searchStation(toInput);
+        console.log('Found destination:', toStation);
 
-        if (!fromStation || !toStation) {
-            throw new Error('Could not find stations. Try "Linz Hbf" and "Wien Hbf"');
+        // Get journeys
+        console.log('Step 3: Fetching train connections...');
+        const journeys = await getJourneys(fromStation.id, toStation.id, selectedDateTime);
+        console.log(`Found ${journeys.length} journeys`);
+
+        if (!journeys || journeys.length === 0) {
+            resultsDiv.innerHTML = '<div class="error">No train connections found for this route and time.</div>';
+            return;
         }
 
-        console.log('Found stations:', fromStation, toStation);
-
-        // Build query URL
-        const queryUrl = `https://fahrplan.oebb.at/bin/query.exe/dn?S=${encodeURIComponent(fromStation.name)}&Z=${encodeURIComponent(toStation.name)}&date=${date}&time=${time}&start=1`;
-
-        console.log('Fetching connections...');
-        const response = await fetchWithProxy(queryUrl);
-        const html = await response.text();
-
-        // Parse connections
-        let connections = parseConnectionsFromHTML(html);
-
-        if (connections.length === 0) {
-            console.warn('No connections parsed, using enhanced mock data');
-            connections = generateEnhancedMockData(selectedDateTime, fromInput, toInput);
-        }
+        // Parse and display journeys
+        const connections = journeys.map(j => parseJourney(j)).filter(c => c !== null);
+        console.log('Parsed connections:', connections);
 
         displayResults(connections, fromStation.name, toStation.name);
 
     } catch (error) {
-        console.error('Search error:', error);
+        console.error('=== SEARCH ERROR ===', error);
         resultsDiv.innerHTML = `
             <div class="error">
                 <strong>Error:</strong> ${error.message}<br><br>
                 <small>
-                    The ÖBB API might be blocking requests. Showing sample data instead.<br>
-                    For real data, try using the official ÖBB app or website.
+                    Make sure you're using valid station names like "Linz Hbf" and "Wien Hbf".<br>
+                    Check the browser console (F12) for more details.
                 </small>
             </div>
         `;
-
-        // Show mock data as fallback
-        const selectedDateTime = new Date(dateTimeInput);
-        const connections = generateEnhancedMockData(selectedDateTime, fromInput, toInput);
-        setTimeout(() => displayResults(connections, fromInput, toInput), 2000);
     } finally {
         loadingDiv.style.display = 'none';
         searchBtn.disabled = false;
     }
-}
-
-// Calculate realistic train capacity based on type
-function getTrainCapacity(category) {
-    const capacities = {
-        'RailJet': { total: 408, firstClass: 66, secondClass: 342 }, // ÖBB RailJet typical capacity
-        'IC': { total: 320, firstClass: 48, secondClass: 272 },
-        'REX': { total: 280, firstClass: 40, secondClass: 240 },
-        'S-Bahn': { total: 350, firstClass: 0, secondClass: 350 },
-        'Train': { total: 300, firstClass: 45, secondClass: 255 }
-    };
-    return capacities[category] || capacities['Train'];
-}
-
-// Calculate realistic seat availability
-function calculateSeatAvailability(category, timeOfDay, index) {
-    const capacity = getTrainCapacity(category);
-    const totalSeats = capacity.secondClass; // Focusing on 2nd class
-
-    // Factor in time of day (rush hours = more crowded)
-    const hour = parseInt(timeOfDay.split(':')[0]);
-    let occupancyBase = 0.5; // 50% base occupancy
-
-    // Rush hours (6-9am, 4-7pm)
-    if ((hour >= 6 && hour <= 9) || (hour >= 16 && hour <= 19)) {
-        occupancyBase = 0.75; // 75% occupancy during rush
-    } else if (hour >= 10 && hour <= 15) {
-        occupancyBase = 0.4; // 40% off-peak
-    } else {
-        occupancyBase = 0.3; // 30% late/early
-    }
-
-    // Add some randomness
-    const randomFactor = (Math.random() * 0.3) - 0.15; // ±15%
-    let occupancy = Math.max(0.1, Math.min(0.95, occupancyBase + randomFactor));
-
-    // Popular trains fill up more
-    if (index === 0 || index === 2) {
-        occupancy = Math.min(0.9, occupancy + 0.15);
-    }
-
-    const occupiedSeats = Math.floor(totalSeats * occupancy);
-    const availableSeats = totalSeats - occupiedSeats;
-
-    return {
-        total: totalSeats,
-        available: availableSeats,
-        occupied: occupiedSeats,
-        percentage: Math.round((availableSeats / totalSeats) * 100),
-        status: availableSeats > totalSeats * 0.3 ? 'available' :
-                availableSeats > totalSeats * 0.1 ? 'limited' : 'unavailable'
-    };
-}
-
-// Generate realistic mock data
-function generateEnhancedMockData(baseTime, from, to) {
-    const connections = [];
-    const categories = [
-        { name: 'RailJet', duration: 75, price: 25.90, changes: 0 },
-        { name: 'RailJet', duration: 77, price: 25.90, changes: 0 },
-        { name: 'IC', duration: 105, price: 19.90, changes: 0 },
-        { name: 'REX', duration: 130, price: 15.90, changes: 1 },
-        { name: 'RailJet', duration: 75, price: 25.90, changes: 0 }
-    ];
-
-    categories.forEach((cat, index) => {
-        const depTime = new Date(baseTime.getTime() + (index * 60 * 60 * 1000));
-        const arrTime = new Date(depTime.getTime() + (cat.duration * 60 * 1000));
-
-        const hours = Math.floor(cat.duration / 60);
-        const mins = cat.duration % 60;
-        const timeStr = depTime.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' });
-
-        // Calculate realistic seat availability
-        const seatInfo = calculateSeatAvailability(cat.name, timeStr, index);
-
-        connections.push({
-            departure: timeStr,
-            arrival: arrTime.toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' }),
-            duration: `${hours}:${String(mins).padStart(2, '0')}`,
-            category: cat.name,
-            trainNumber: `${cat.name} ${800 + index}`,
-            platform: String(Math.floor(Math.random() * 8) + 1),
-            changes: cat.changes,
-            price: cat.price,
-            delay: Math.random() > 0.85 ? Math.floor(Math.random() * 12) + 3 : 0,
-            seats: seatInfo
-        });
-    });
-
-    return connections;
 }
 
 // Display results
@@ -323,12 +210,7 @@ function displayResults(connections, fromStation, toStation) {
     }
 
     connections.forEach((conn, index) => {
-        // Use seat info if available, otherwise calculate it
-        let seatInfo = conn.seats;
-        if (!seatInfo) {
-            seatInfo = calculateSeatAvailability(conn.category, conn.departure, index);
-        }
-
+        const seatInfo = conn.seats;
         const availability = seatInfo.status;
         const availabilityText = {
             'available': 'Good Availability',
@@ -337,17 +219,14 @@ function displayResults(connections, fromStation, toStation) {
         }[availability] || 'Unknown';
 
         const delayHTML = conn.delay && conn.delay > 0
-            ? `<span class="delay">+${conn.delay} min</span>`
+            ? `<span class="delay">+${Math.floor(conn.delay / 60)} min</span>`
             : '';
-
-        const trainNum = conn.trainNumber || `${conn.category} ${800 + index}`;
-        const price = conn.price || 19.90;
 
         const card = document.createElement('div');
         card.className = 'train-card';
         card.innerHTML = `
             <div class="train-header">
-                <div class="train-name">${trainNum}</div>
+                <div class="train-name">${conn.trainNumber}</div>
                 <div class="train-category">${conn.category}</div>
             </div>
 
@@ -355,7 +234,7 @@ function displayResults(connections, fromStation, toStation) {
                 <div class="time-info">
                     <div class="time-label">Departure</div>
                     <div class="time">${conn.departure}${delayHTML}</div>
-                    <div class="station">${fromStation || 'Linz Hbf'}</div>
+                    <div class="station">${fromStation}</div>
                     <div style="margin-top: 10px;">
                         <span class="platform">Platform ${conn.platform}</span>
                     </div>
@@ -363,21 +242,21 @@ function displayResults(connections, fromStation, toStation) {
 
                 <div class="duration">
                     <div class="duration-icon">→</div>
-                    <div class="duration-text">${formatDuration(conn.duration)}</div>
+                    <div class="duration-text">${conn.duration.split(':')[0]}h ${conn.duration.split(':')[1]}min</div>
                     ${conn.changes > 0 ? `<div class="duration-text">${conn.changes} change${conn.changes > 1 ? 's' : ''}</div>` : '<div class="duration-text">Direct</div>'}
                 </div>
 
                 <div class="time-info">
                     <div class="time-label">Arrival</div>
                     <div class="time">${conn.arrival}</div>
-                    <div class="station">${toStation || 'Wien Hbf'}</div>
+                    <div class="station">${toStation}</div>
                 </div>
             </div>
 
             <div class="train-details">
                 <div class="detail-item">
                     <div class="detail-label">Price (2nd class)</div>
-                    <div class="detail-value">€ ${price.toFixed(2)}</div>
+                    <div class="detail-value">€ ${conn.price.toFixed(2)}</div>
                 </div>
                 <div class="detail-item">
                     <div class="detail-label">Seat Availability (2nd Class)</div>
@@ -407,15 +286,16 @@ function displayResults(connections, fromStation, toStation) {
 
 // Console info
 console.log(`
-ÖBB Train Availability App - Real API Version
-==============================================
+ÖBB Train Availability App - Real API
+=====================================
 
-Using reverse-engineered ÖBB HAFAS endpoints with CORS proxies.
+Using v6.oebb.transport.rest public API
+No mock data - all connections are real!
 
+API Base: ${API_BASE}
 Endpoints:
-- Station search: fahrplan.oebb.at/bin/ajax-getstop.exe/dn
-- Journey query: fahrplan.oebb.at/bin/query.exe/dn
+- /locations?query={station}
+- /journeys?from={id}&to={id}&departure={iso-date}
 
-Note: Due to CORS restrictions, this uses public proxy services.
-For production use, set up your own backend proxy or use the official ÖBB API.
+Open console to see detailed API calls and responses.
 `);
