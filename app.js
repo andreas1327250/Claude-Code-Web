@@ -25,10 +25,10 @@ async function makeHAFASRequest(method, params) {
             id: "OEBB",
             type: "AND",
             name: "oebbANDROID",
-            v: "6060900"
+            v: "6080600"
         },
-        ver: "1.57",
-        ext: "OEBB.15",
+        ver: "1.65",
+        ext: "OEBB.17",
         lang: "deu",
         svcReqL: [{
             meth: method,
