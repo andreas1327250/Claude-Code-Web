@@ -2,6 +2,11 @@
 // Using https://fahrplan.oebb.at/bin/mgate.exe
 
 const API_ENDPOINT = 'https://fahrplan.oebb.at/bin/mgate.exe';
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+function getProxiedURL(url) {
+    return CORS_PROXY + encodeURIComponent(url);
+}
 
 // Set default date/time
 window.addEventListener('DOMContentLoaded', () => {
@@ -33,7 +38,7 @@ async function makeHAFASRequest(method, params) {
 
     console.log('🚀 HAFAS Request:', method, params);
 
-    const response = await fetch(API_ENDPOINT, {
+    const response = await fetch(getProxiedURL(API_ENDPOINT), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
