@@ -13,24 +13,31 @@ window.addEventListener('DOMContentLoaded', () => {
 // Search for station using transport.rest API
 async function searchStation(query) {
     try {
-        const url = `${API_BASE}/locations?query=${encodeURIComponent(query)}&results=1`;
-        console.log('Searching station:', url);
+        const url = `${API_BASE}/locations?query=${encodeURIComponent(query)}&results=3`;
+        console.log('🔍 Searching station:', url);
 
         const response = await fetch(url);
+        console.log('📡 Response status:', response.status, response.statusText);
+
         if (!response.ok) {
-            throw new Error(`Station search failed: ${response.status}`);
+            const errorText = await response.text();
+            console.error('❌ API Error:', errorText);
+            throw new Error(`Station search failed: ${response.status} - ${errorText}`);
         }
 
         const locations = await response.json();
-        console.log('Station search results:', locations);
+        console.log('✅ Station search results:', locations);
 
-        if (locations && locations.length > 0) {
-            return locations[0];
+        if (!locations || locations.length === 0) {
+            throw new Error(`Station "${query}" not found. Try "Linz Hbf" or "Wien Hbf"`);
         }
 
-        throw new Error(`Station "${query}" not found`);
+        // Return first station (type: 'station')
+        const station = locations.find(loc => loc.type === 'station') || locations[0];
+        console.log('🎯 Selected station:', station);
+        return station;
     } catch (error) {
-        console.error('Station search error:', error);
+        console.error('💥 Station search error:', error);
         throw error;
     }
 }
@@ -38,20 +45,25 @@ async function searchStation(query) {
 // Get train journeys between two stations
 async function getJourneys(fromId, toId, date) {
     try {
-        const url = `${API_BASE}/journeys?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&departure=${encodeURIComponent(date.toISOString())}&results=10`;
-        console.log('Fetching journeys:', url);
+        const url = `${API_BASE}/journeys?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}&departure=${encodeURIComponent(date.toISOString())}&results=10&stopovers=false`;
+        console.log('🚂 Fetching journeys:', url);
 
         const response = await fetch(url);
+        console.log('📡 Response status:', response.status, response.statusText);
+
         if (!response.ok) {
-            throw new Error(`Journeys API failed: ${response.status}`);
+            const errorText = await response.text();
+            console.error('❌ API Error:', errorText);
+            throw new Error(`Journeys API failed: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
-        console.log('Journeys response:', data);
+        console.log('✅ Journeys response:', data);
+        console.log(`📊 Found ${data.journeys ? data.journeys.length : 0} journeys`);
 
         return data.journeys || [];
     } catch (error) {
-        console.error('Journeys API error:', error);
+        console.error('💥 Journeys API error:', error);
         throw error;
     }
 }
@@ -186,11 +198,21 @@ async function searchTrains() {
         console.error('=== SEARCH ERROR ===', error);
         resultsDiv.innerHTML = `
             <div class="error">
-                <strong>Error:</strong> ${error.message}<br><br>
-                <small>
-                    Make sure you're using valid station names like "Linz Hbf" and "Wien Hbf".<br>
-                    Check the browser console (F12) for more details.
-                </small>
+                <strong>❌ Error:</strong> ${error.message}<br><br>
+                <details style="margin-top: 15px;">
+                    <summary style="cursor: pointer; font-weight: bold;">🔍 Troubleshooting</summary>
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        <p><strong>Common fixes:</strong></p>
+                        <ul style="margin: 10px 0 10px 20px;">
+                            <li>Use full station names: "Linz Hbf", "Wien Hbf"</li>
+                            <li>Check browser console (F12) for detailed errors</li>
+                            <li>Try refreshing the page</li>
+                            <li>Verify the API is online: <a href="https://v6.oebb.transport.rest/" target="_blank">v6.oebb.transport.rest</a></li>
+                        </ul>
+                        <p style="margin-top: 10px;"><strong>API Status:</strong></p>
+                        <p>If the API is down, you'll see CORS or network errors in the console.</p>
+                    </div>
+                </details>
             </div>
         `;
     } finally {
