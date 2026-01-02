@@ -38,7 +38,10 @@ async function makeHAFASRequest(method, params) {
 
     console.log('🚀 HAFAS Request:', method, params);
 
-    const response = await fetch(getProxiedURL(API_ENDPOINT), {
+    const proxiedURL = getProxiedURL(API_ENDPOINT);
+    console.log('🌐 Calling via proxy:', proxiedURL);
+
+    const response = await fetch(proxiedURL, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
